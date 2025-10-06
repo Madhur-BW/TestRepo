@@ -1,0 +1,185 @@
+{
+	"name": "df_l2_text_values",
+	"properties": {
+		"folder": {
+			"name": "3rd Party/L2/data-points/values"
+		},
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"linkedService": {
+						"referenceName": "ls_st_datalake_prod_eastus_001",
+						"type": "LinkedServiceReference"
+					},
+					"name": "jsonFiles"
+				},
+				{
+					"linkedService": {
+						"referenceName": "Dedicated_Pool_Prod_DB",
+						"type": "LinkedServiceReference"
+					},
+					"name": "oldRecords"
+				},
+				{
+					"linkedService": {
+						"referenceName": "ls_st_datalake_prod_eastus_001",
+						"type": "LinkedServiceReference"
+					},
+					"name": "newRecords"
+				}
+			],
+			"sinks": [
+				{
+					"name": "cachedNames"
+				},
+				{
+					"linkedService": {
+						"referenceName": "Dedicated_Pool_Prod_DB",
+						"type": "LinkedServiceReference"
+					},
+					"name": "deleteRecords"
+				},
+				{
+					"linkedService": {
+						"referenceName": "Dedicated_Pool_Prod_DB",
+						"type": "LinkedServiceReference"
+					},
+					"name": "insertRecords"
+				}
+			],
+			"transformations": [
+				{
+					"name": "distinctDataPointNames"
+				},
+				{
+					"name": "addLookupColumn"
+				},
+				{
+					"name": "findDeletes"
+				},
+				{
+					"name": "setDelete"
+				},
+				{
+					"name": "sortNewRecords"
+				},
+				{
+					"name": "addCreatedDate"
+				},
+				{
+					"name": "rearrangeColumns"
+				},
+				{
+					"name": "setInserts"
+				}
+			],
+			"scriptLines": [
+				"parameters{",
+				"     schema as string ('gold'),",
+				"     table as string ('l2_data_dictionary_text_values_v2'),",
+				"     folderName as string ('3rd-party/l2/scratch/text_values/'),",
+				"     insertDate as timestamp (currentTimestamp())",
+				"}",
+				"source(output(",
+				"          name as string,",
+				"          sort_order as integer,",
+				"          value as string",
+				"     ),",
+				"     useSchema: false,",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     ignoreNoFilesFound: false,",
+				"     format: 'json',",
+				"     fileSystem: 'prodhspsynapsefs',",
+				"     documentForm: 'documentPerLine',",
+				"     wildcardPaths:[(concat($folderName, \"*.json\"))]) ~> jsonFiles",
+				"source(output(",
+				"          name as string,",
+				"          value as string,",
+				"          sort_order as short,",
+				"          dt_created as timestamp",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     format: 'table',",
+				"     store: 'synapseanalytics',",
+				"     schemaName: ($schema),",
+				"     tableName: ($table),",
+				"     isolationLevel: 'READ_UNCOMMITTED',",
+				"     staged: true) ~> oldRecords",
+				"source(output(",
+				"          name as string,",
+				"          sort_order as integer,",
+				"          value as string",
+				"     ),",
+				"     useSchema: false,",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     ignoreNoFilesFound: false,",
+				"     format: 'json',",
+				"     fileSystem: 'prodhspsynapsefs',",
+				"     documentForm: 'documentPerLine',",
+				"     wildcardPaths:[(concat($folderName, \"*.json\"))]) ~> newRecords",
+				"jsonFiles aggregate(groupBy(name),",
+				"     values = collectUnique(value)) ~> distinctDataPointNames",
+				"oldRecords derive(lookup = cachedNames#lookup(name).name) ~> addLookupColumn",
+				"addLookupColumn filter(not(isNull(lookup))) ~> findDeletes",
+				"findDeletes alterRow(deleteIf(true())) ~> setDelete",
+				"newRecords sort(asc(name, true),",
+				"     asc(sort_order, true)) ~> sortNewRecords",
+				"sortNewRecords derive(dt_created = $insertDate) ~> addCreatedDate",
+				"addCreatedDate select(mapColumn(",
+				"          name,",
+				"          value,",
+				"          sort_order,",
+				"          dt_created",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> rearrangeColumns",
+				"rearrangeColumns alterRow(insertIf(true())) ~> setInserts",
+				"distinctDataPointNames sink(validateSchema: false,",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     keys:['name'],",
+				"     store: 'cache',",
+				"     format: 'inline',",
+				"     output: false,",
+				"     saveOrder: 1) ~> cachedNames",
+				"setDelete sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     format: 'table',",
+				"     store: 'synapseanalytics',",
+				"     schemaName: ($schema),",
+				"     tableName: ($table),",
+				"     insertable: false,",
+				"     updateable: false,",
+				"     deletable: true,",
+				"     upsertable: false,",
+				"     keys:['name'],",
+				"     allowCopyCommand: true,",
+				"     staged: true,",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     saveOrder: 2,",
+				"     errorHandlingOption: 'stopOnFirstError') ~> deleteRecords",
+				"setInserts sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     format: 'table',",
+				"     store: 'synapseanalytics',",
+				"     schemaName: ($schema),",
+				"     tableName: ($table),",
+				"     insertable: true,",
+				"     updateable: false,",
+				"     deletable: false,",
+				"     upsertable: false,",
+				"     allowCopyCommand: true,",
+				"     staged: true,",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     saveOrder: 3,",
+				"     errorHandlingOption: 'stopOnFirstError') ~> insertRecords"
+			]
+		}
+	}
+}
